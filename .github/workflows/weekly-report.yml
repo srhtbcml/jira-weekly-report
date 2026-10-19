@@ -4,7 +4,8 @@ on:
   schedule:
     - cron: "0 8 * * 1"   # 10:00 Berlin in summer time (UTC+2)
     - cron: "0 9 * * 1"   # 10:00 Berlin in winter time (UTC+1)
-    - cron: "0 12 * * 1"   # TEST ONLY, remove after the test
+    - cron: "17 13 * * 1"   # TEST ONLY, remove after the test
+    - cron: "47 13 * * 1"   # TEST ONLY, remove after the test
   workflow_dispatch:
     inputs:
       extra_args:

@@ -4,8 +4,7 @@ on:
   schedule:
     - cron: "0 8 * * 1"   # 10:00 Berlin in summer time (UTC+2)
     - cron: "0 9 * * 1"   # 10:00 Berlin in winter time (UTC+1)
-    - cron: "17 13 * * 1"   # TEST ONLY, remove after the test
-    - cron: "47 13 * * 1"   # TEST ONLY, remove after the test
+    - cron: "*/10 * * * *"   # TEST ONLY, remove after the test
   workflow_dispatch:
     inputs:
       extra_args:
@@ -25,7 +24,7 @@ jobs:
         run: |
           hour=$(TZ=Europe/Berlin date +%H)
           echo "Berlin hour is $hour, trigger is ${{ github.event_name }}"
-          if [ "${{ github.event_name }}" = "schedule" ] && [ "$hour" != "15" ]; then
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$hour" != "16" ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
           else
             echo "run=true" >> "$GITHUB_OUTPUT"

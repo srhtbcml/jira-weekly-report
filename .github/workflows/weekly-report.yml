@@ -1,0 +1,66 @@
+name: Weekly Jira report
+
+on:
+  schedule:
+    - cron: "0 8 * * 1"   # 10:00 Berlin in summer time (UTC+2)
+    - cron: "0 9 * * 1"   # 10:00 Berlin in winter time (UTC+1)
+  workflow_dispatch:
+    inputs:
+      extra_args:
+        description: "Extra options, for example: --days 30 --types Task"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the Berlin time
+        id: gate
+        run: |
+          hour=$(TZ=Europe/Berlin date +%H)
+          echo "Berlin hour is $hour, trigger is ${{ github.event_name }}"
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$hour" != "10" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Get the code
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/checkout@v4
+
+      - name: Install Python
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install requests
+        if: steps.gate.outputs.run == 'true'
+        run: pip install requests
+
+      - name: Run the report
+        if: steps.gate.outputs.run == 'true'
+        env:
+          JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+          JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          MAIL_FROM: ${{ secrets.MAIL_FROM }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+          EXTRA_ARGS: ${{ inputs.extra_args }}
+        run: python reportScript.py --project KAN $EXTRA_ARGS
+
+      - name: Keep the HTML report
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: jira-report
+          path: reports/

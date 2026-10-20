@@ -4,7 +4,6 @@ on:
   schedule:
     - cron: "0 8 * * 1"   # 10:00 Berlin in summer time (UTC+2)
     - cron: "0 9 * * 1"   # 10:00 Berlin in winter time (UTC+1)
-    - cron: "*/10 * * * *"   # TEST ONLY, remove after the test
   workflow_dispatch:
     inputs:
       extra_args:
@@ -21,14 +20,20 @@ jobs:
     steps:
       - name: Check the Berlin time
         id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+          CRON: ${{ github.event.schedule }}
         run: |
-          hour=$(TZ=Europe/Berlin date +%H)
-          echo "Berlin hour is $hour, trigger is ${{ github.event_name }}"
-          if [ "${{ github.event_name }}" = "schedule" ] && [ "$hour" = "99" ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=true" >> "$GITHUB_OUTPUT"
+          offset=$(TZ=Europe/Berlin date +%z)
+          echo "Trigger: $EVENT, cron: $CRON, Berlin offset: $offset"
+          run=true
+          if [ "$EVENT" = "schedule" ]; then
+            run=false
+            if [ "$CRON" = "0 8 * * 1" ] && [ "$offset" = "+0200" ]; then run=true; fi
+            if [ "$CRON" = "0 9 * * 1" ] && [ "$offset" = "+0100" ]; then run=true; fi
           fi
+          echo "Run the report: $run"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
 
       - name: Get the code
         if: steps.gate.outputs.run == 'true'

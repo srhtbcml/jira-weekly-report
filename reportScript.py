@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-FIELDS = "summary,status,priority,issuetype"
+FIELDS = "summary,status,priority,issuetype,created,resolutiondate"
 
 
 def need(name):
@@ -47,8 +47,12 @@ def jira_get(session, base, path, params):
             sys.exit("ERROR 403: this user may not browse the project")
         if r.status_code == 400:
             sys.exit(f"ERROR 400: Jira rejected the query: {r.text[:300]}")
-        r.raise_for_status()
-        return r.json()
+        if r.status_code >= 400:
+            sys.exit(f"ERROR {r.status_code}: Jira refused the request: {r.text[:300]}")
+        try:
+            return r.json()
+        except ValueError:
+            sys.exit("ERROR: Jira did not send valid JSON")
     sys.exit("ERROR: Jira did not answer after 3 tries")
 
 
@@ -86,6 +90,32 @@ def build_queries(project, start, end, types, priorities):
     }
 
 
+def parse_time(text):
+    """Jira dates look like 2026-10-19T12:18:30.000+0200."""
+    return datetime.strptime(text, "%Y-%m-%dT%H:%M:%S.%f%z")
+
+
+def check_issue(item, list_name):
+    """Return a list of warnings for one issue. An empty list means the data looks fine."""
+    key = item.get("key")
+    fields = item.get("fields") or {}
+    if not key or not fields:
+        return ["An issue came back without a key or without fields and was left out"]
+    warnings = []
+    created, resolved = fields.get("created"), fields.get("resolutiondate")
+    if list_name == "Resolved" and not resolved:
+        warnings.append(f"{key} is in the Resolved list but has no resolution date")
+    if list_name == "Open now" and resolved:
+        warnings.append(f"{key} is open but has a resolution date")
+    if created and resolved:
+        try:
+            if parse_time(resolved) < parse_time(created):
+                warnings.append(f"{key} was resolved before it was created")
+        except ValueError:
+            warnings.append(f"{key} has a date that could not be read")
+    return warnings
+
+
 def to_rows(issues, site):
     rows = []
     for item in issues:
@@ -101,7 +131,7 @@ def to_rows(issues, site):
     return rows
 
 
-def make_report(project, start, end, sections, filters):
+def make_report(project, start, end, sections, filters, warnings):
     title = f"Jira weekly report {project}: {start} to {end}"
     text = [title, filters, ""]
     page = [f"<h2>{html.escape(title)}</h2>", f"<p>{html.escape(filters)}</p>",
@@ -127,6 +157,10 @@ def make_report(project, start, end, sections, filters):
                         f"<td>{html.escape(r['summary'])}</td><td>{html.escape(r['type'])}</td>"
                         f"<td>{html.escape(r['priority'])}</td><td>{html.escape(r['status'])}</td></tr>")
         page.append("</table>")
+    if warnings:
+        text += ["", f"Data warnings ({len(warnings)})"] + [f"  - {w}" for w in warnings]
+        page.append(f"<h3>Data warnings ({len(warnings)})</h3><ul>"
+                    + "".join(f"<li>{html.escape(w)}</li>" for w in warnings) + "</ul>")
     return title, "\n".join(text), "".join(page)
 
 
@@ -172,13 +206,18 @@ def main():
     session.auth = (need("JIRA_EMAIL"), need("JIRA_API_TOKEN"))
     session.headers["Accept"] = "application/json"
 
-    sections = []
+    sections, warnings = [], []
     for name, jql in build_queries(a.project, start, end, types, priorities).items():
         print(f"{name}: {jql}")
-        sections.append((name, to_rows(search(session, site, jql), site)))
+        issues = search(session, site, jql)
+        for item in issues:
+            warnings += check_issue(item, name)
+        usable = [i for i in issues if i.get("key") and i.get("fields")]
+        sections.append((name, to_rows(usable, site)))
+    warnings = list(dict.fromkeys(warnings))  # the same warning only once
 
     filters = f"Filters: types={', '.join(types) or 'all'}; priorities={', '.join(priorities) or 'all'}"
-    subject, text, page = make_report(a.project, start, end, sections, filters)
+    subject, text, page = make_report(a.project, start, end, sections, filters, warnings)
 
     os.makedirs("reports", exist_ok=True)
     with open(f"reports/{a.project}_{end}.html", "w", encoding="utf-8") as fh:
